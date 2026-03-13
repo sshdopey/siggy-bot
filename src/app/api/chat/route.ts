@@ -41,7 +41,7 @@ export async function POST(req: Request) {
     }
 
     const stream = await getGroq().chat.completions.create({
-      model: "llama-3.1-8b-instant",
+      model: "llama-3.3-70b-versatile",
       messages: [
         { role: "system", content: SIGGY_SYSTEM_PROMPT + priceContext },
         ...messages.slice(-20),
