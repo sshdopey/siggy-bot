@@ -1,5 +1,5 @@
 import Groq from "groq-sdk";
-import { SIGGY_SYSTEM_PROMPT, type SiggyMode, MODE_CONFIG } from "@/lib/constants";
+import { SIGGY_SYSTEM_PROMPT } from "@/lib/constants";
 import { detectPriceQuery, formatPrice } from "@/lib/utils";
 
 function getGroq() {
@@ -19,15 +19,11 @@ async function fetchPrices(tokenIds: string[]): Promise<string> {
       { next: { revalidate: 60 } }
     );
     if (!res.ok) return "";
-
     const data = await res.json();
     const lines = Object.entries(data).map(([id, info]: [string, any]) => {
-      const price = formatPrice(info.usd);
-      const change = info.usd_24h_change?.toFixed(2) ?? "?";
-      return `${id.toUpperCase()}: ${price} (24h: ${change}%)`;
+      return `${id.toUpperCase()}: ${formatPrice(info.usd)} (24h: ${info.usd_24h_change?.toFixed(2) ?? "?"}%)`;
     });
-
-    return `\n\n[LIVE PRICE DATA - incorporate naturally in your response]\n${lines.join("\n")}`;
+    return `\n\n[LIVE PRICE DATA - weave naturally into your response]\n${lines.join("\n")}`;
   } catch {
     return "";
   }
@@ -35,34 +31,24 @@ async function fetchPrices(tokenIds: string[]): Promise<string> {
 
 export async function POST(req: Request) {
   try {
-    const { messages, mode = "mystical" } = (await req.json()) as {
-      messages: ChatMessage[];
-      mode: SiggyMode;
-    };
+    const { messages } = (await req.json()) as { messages: ChatMessage[] };
 
-    const config = MODE_CONFIG[mode] || MODE_CONFIG.mystical;
-
-    // Check if the latest user message asks about prices
     const lastUserMsg = messages.filter((m) => m.role === "user").pop();
     let priceContext = "";
     if (lastUserMsg) {
       const tokens = detectPriceQuery(lastUserMsg.content);
-      if (tokens.length > 0) {
-        priceContext = await fetchPrices(tokens);
-      }
+      if (tokens.length > 0) priceContext = await fetchPrices(tokens);
     }
-
-    const systemMessage: ChatMessage = {
-      role: "system",
-      content: SIGGY_SYSTEM_PROMPT + priceContext,
-    };
 
     const stream = await getGroq().chat.completions.create({
       model: "llama-3.1-8b-instant",
-      messages: [systemMessage, ...messages.slice(-20)], // Keep last 20 msgs for context
+      messages: [
+        { role: "system", content: SIGGY_SYSTEM_PROMPT + priceContext },
+        ...messages.slice(-20),
+      ],
       stream: true,
-      temperature: config.temperature,
-      max_tokens: 512,
+      temperature: 1.0,
+      max_tokens: 500,
       top_p: 0.9,
     });
 
@@ -77,10 +63,8 @@ export async function POST(req: Request) {
             }
           }
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        } catch (err) {
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`)
-          );
+        } catch {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: "Stream error" })}\n\n`));
         } finally {
           controller.close();
         }
@@ -96,9 +80,6 @@ export async function POST(req: Request) {
     });
   } catch (error: any) {
     console.error("Chat API error:", error);
-    return Response.json(
-      { error: error.message || "Failed to generate response" },
-      { status: 500 }
-    );
+    return Response.json({ error: error.message || "Failed" }, { status: 500 });
   }
 }
